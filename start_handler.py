@@ -3,7 +3,7 @@ from aiogram.filters import CommandStart
 from aiogram.enums import ParseMode
 
 # URL твоего мини-приложения
-WEBAPP_URL = "https://your-webapp-url.com"  # замени на свой URL
+WEBAPP_URL = "https://vavilonpenis.github.io/название-репозитория"  # замени на свой URL
 
 def get_start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
