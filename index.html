@@ -4451,6 +4451,56 @@ body.is-detailed #load-more-btn {
     0%, 100% { transform: translateY(0) translateX(var(--tx, 0)); }
     50% { transform: translateY(-10px) translateX(var(--tx, 0)); }
 }
+
+/* ===== BUY MODAL ===== */
+#buy-modal-overlay {
+    display:none; position:fixed; inset:0; z-index:99998;
+    background:rgba(0,0,0,0.8); backdrop-filter:blur(8px);
+}
+#buy-modal-overlay.active { display:flex; align-items:flex-end; justify-content:center; }
+#buy-modal {
+    background:#18181d; border:1px solid rgba(255,255,255,0.1);
+    border-radius:24px 24px 0 0; padding:24px 20px 36px;
+    width:100%; max-width:500px;
+    animation:tcSlideUp .35s cubic-bezier(.34,1.56,.64,1);
+}
+.buy-modal-handle { width:36px; height:4px; background:rgba(255,255,255,0.12); border-radius:2px; margin:0 auto 20px; }
+.buy-modal-preview {
+    display:flex; align-items:center; gap:14px;
+    background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+    border-radius:16px; padding:14px; margin-bottom:20px;
+}
+.buy-modal-lottie { width:64px; height:64px; border-radius:12px; overflow:hidden; flex-shrink:0; }
+.buy-modal-name { font-size:16px; font-weight:700; color:#fff; margin-bottom:4px; }
+.buy-modal-coll { font-size:12px; color:#555; }
+.buy-price-row {
+    display:flex; align-items:center; justify-content:space-between;
+    background:rgba(0,152,234,0.07); border:1px solid rgba(0,152,234,0.15);
+    border-radius:14px; padding:14px 16px; margin-bottom:20px;
+}
+.buy-price-label { font-size:12px; color:#555; margin-bottom:3px; }
+.buy-price-val { font-size:26px; font-weight:900; color:#fff; }
+.buy-price-ton { font-size:13px; color:#0098EA; font-weight:600; }
+.buy-confirm-btn {
+    width:100%; padding:16px; border-radius:16px; border:none; cursor:pointer;
+    background:linear-gradient(135deg,#0098EA,#006bb3);
+    font-size:16px; font-weight:700; color:#fff; font-family:inherit;
+    box-shadow:0 8px 24px rgba(0,152,234,0.3);
+    transition:transform .15s, box-shadow .15s;
+}
+.buy-confirm-btn:active { transform:scale(0.97); box-shadow:0 4px 12px rgba(0,152,234,0.2); }
+.buy-confirm-btn:disabled { opacity:0.5; cursor:not-allowed; }
+.buy-cancel-btn {
+    width:100%; padding:13px; border-radius:14px; border:1px solid rgba(255,255,255,0.08);
+    background:transparent; font-size:14px; color:#555; cursor:pointer;
+    font-family:inherit; margin-top:8px;
+}
+.buy-wallet-warn {
+    background:rgba(255,165,0,0.08); border:1px solid rgba(255,165,0,0.2);
+    border-radius:12px; padding:12px 14px; margin-bottom:16px;
+    font-size:13px; color:#ffaa00; text-align:center;
+}
+.buy-status { text-align:center; padding:8px 0; font-size:14px; color:#888; }
 </style>
 
 
@@ -6263,8 +6313,8 @@ function createCard(item, isOwned) {
             btn.style.transform = "scale(0.85)";
             setTimeout(() => btn.style.transform = "scale(1)", 150);
             
-            // Добавляем в корзину
-            addToCart(item);
+            // Открываем модалку покупки
+            openBuyModal(item);
         };
     }
 
@@ -7764,7 +7814,7 @@ function updateCartUI() {
                     </span>
                 </div>
 
-                <button class="checkout-btn-large" onclick="openAuthSheet()">
+                <button class="checkout-btn-large" onclick="openCartCheckout()">
                     Перейти к оплате
                 </button>
             </div>
@@ -7898,7 +7948,109 @@ function tcUpdateBtn(){
 }
 
 function tcOpenModal(){
-    if(!_tcUI){tcInit();setTimeout(tcOpenModal,800);return;}
+    if(!_tcUI){
+// ===== BUY FLOW =====
+const SHOP_WALLET = 'UQDWhlUxve8HSFqrF8njunqNpCZl_RWT9TjTmRfRpO_1Wdlr';
+
+function parseTonPrice(priceStr) {
+    if (!priceStr) return 0;
+    // "15 TON" -> 15, "5,89 TON" -> 5.89
+    const clean = priceStr.replace(/\s*TON/i,'').replace(',','.').trim();
+    return parseFloat(clean) || 0;
+}
+
+function openBuyModal(item) {
+    const tonPrice = parseTonPrice(item.price);
+    const nanotons = Math.round(tonPrice * 1e9).toString();
+    const isConnected = _tcConnected;
+    
+    const inner = document.getElementById('buy-modal-inner');
+    inner.innerHTML = `
+        <div class="buy-modal-preview">
+            <div class="buy-modal-lottie" id="buy-lottie-wrap" style="background:radial-gradient(circle,${item.bgColor||'#222'} 0%,#111 100%);display:flex;align-items:center;justify-content:center;"></div>
+            <div>
+                <div class="buy-modal-name">${item.title}</div>
+                <div class="buy-modal-coll">${item.collection}</div>
+            </div>
+        </div>
+        ${!isConnected ? '<div class="buy-wallet-warn">⚠️ Подключи кошелёк чтобы купить</div>' : ''}
+        <div class="buy-price-row">
+            <div>
+                <div class="buy-price-label">Цена</div>
+                <div class="buy-price-val">${tonPrice} <span class="buy-price-ton">TON</span></div>
+            </div>
+            <img src="https://i.ibb.co/mfX9wT4/orig.webp" style="width:36px;height:36px;border-radius:50%;">
+        </div>
+        <div id="buy-status" class="buy-status"></div>
+        ${isConnected
+            ? `<button class="buy-confirm-btn" id="buy-confirm-btn" onclick="confirmBuy('${item.title}','${nanotons}')">
+                   💳 Купить за ${tonPrice} TON
+               </button>`
+            : `<button class="buy-confirm-btn" onclick="closeBuyModal();tcOpenModal()">
+                   👛 Подключить кошелёк
+               </button>`
+        }
+        <button class="buy-cancel-btn" onclick="closeBuyModal()">Отмена</button>
+    `;
+
+    // Inject lottie
+    const lw = document.getElementById('buy-lottie-wrap');
+    if (lw && item.lottie) {
+        const lp = document.createElement('lottie-player');
+        lp.setAttribute('src', item.lottie);
+        lp.setAttribute('background','transparent');
+        lp.setAttribute('speed','1');
+        lp.setAttribute('loop','');
+        lp.setAttribute('autoplay','');
+        lp.style.cssText = 'width:64px;height:64px;';
+        lw.appendChild(lp);
+    }
+
+    document.getElementById('buy-modal-overlay').classList.add('active');
+}
+
+function closeBuyModal() {
+    document.getElementById('buy-modal-overlay').classList.remove('active');
+}
+
+async function confirmBuy(title, nanotons) {
+    if (!_tcUI || !_tcConnected) {
+        tcOpenModal(); return;
+    }
+    const btn = document.getElementById('buy-confirm-btn');
+    const status = document.getElementById('buy-status');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Отправка...'; }
+    if (status) status.textContent = 'Подтвердите транзакцию в кошельке...';
+
+    try {
+        const tx = {
+            validUntil: Math.floor(Date.now() / 1000) + 300,
+            messages: [{
+                address: SHOP_WALLET,
+                amount: nanotons,
+            }]
+        };
+        await _tcUI.sendTransaction(tx);
+        if (status) status.innerHTML = '<span style="color:#2ecc71">✅ Оплата прошла! Скоро получишь подарок.</span>';
+        if (btn) { btn.textContent = '✅ Оплачено'; }
+        window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+        setTimeout(closeBuyModal, 3000);
+    } catch(e) {
+        if (status) status.innerHTML = '<span style="color:#e74c3c">❌ Отменено или ошибка</span>';
+        if (btn) { btn.disabled = false; btn.textContent = '💳 Попробовать снова'; }
+    }
+}
+
+
+function openCartCheckout() {
+    if (!_tcConnected) { tcOpenModal(); return; }
+    // Calculate total and send single transaction
+    const total = cartItems.reduce((sum, item) => sum + parseTonPrice(item.price), 0);
+    const nanotons = Math.round(total * 1e9).toString();
+    const fakeItem = { title: 'Заказ из корзины (' + cartItems.length + ' товаров)', collection: 'AstralGifts', price: total + ' TON', bgColor: '#0098EA', lottie: '' };
+    openBuyModal(fakeItem);
+}
+tcInit();setTimeout(tcOpenModal,800);return;}
     if(_tcConnected){
         document.getElementById('tc-modal-inner').innerHTML=
             '<div class="tc-title">💎 Кошелёк</div>'+
@@ -7922,6 +8074,108 @@ function tcCloseMod(){document.getElementById('tc-wallet-modal-overlay')?.classL
 async function tcDisconnect(){await _tcUI?.disconnect();tcCloseMod();}
 async function tcRefreshBal(){if(_tcAddr)await tcFetchBalance(_tcAddr);tcOpenModal();}
 
+
+// ===== BUY FLOW =====
+const SHOP_WALLET = 'UQDWhlUxve8HSFqrF8njunqNpCZl_RWT9TjTmRfRpO_1Wdlr';
+
+function parseTonPrice(priceStr) {
+    if (!priceStr) return 0;
+    // "15 TON" -> 15, "5,89 TON" -> 5.89
+    const clean = priceStr.replace(/\s*TON/i,'').replace(',','.').trim();
+    return parseFloat(clean) || 0;
+}
+
+function openBuyModal(item) {
+    const tonPrice = parseTonPrice(item.price);
+    const nanotons = Math.round(tonPrice * 1e9).toString();
+    const isConnected = _tcConnected;
+    
+    const inner = document.getElementById('buy-modal-inner');
+    inner.innerHTML = `
+        <div class="buy-modal-preview">
+            <div class="buy-modal-lottie" id="buy-lottie-wrap" style="background:radial-gradient(circle,${item.bgColor||'#222'} 0%,#111 100%);display:flex;align-items:center;justify-content:center;"></div>
+            <div>
+                <div class="buy-modal-name">${item.title}</div>
+                <div class="buy-modal-coll">${item.collection}</div>
+            </div>
+        </div>
+        ${!isConnected ? '<div class="buy-wallet-warn">⚠️ Подключи кошелёк чтобы купить</div>' : ''}
+        <div class="buy-price-row">
+            <div>
+                <div class="buy-price-label">Цена</div>
+                <div class="buy-price-val">${tonPrice} <span class="buy-price-ton">TON</span></div>
+            </div>
+            <img src="https://i.ibb.co/mfX9wT4/orig.webp" style="width:36px;height:36px;border-radius:50%;">
+        </div>
+        <div id="buy-status" class="buy-status"></div>
+        ${isConnected
+            ? `<button class="buy-confirm-btn" id="buy-confirm-btn" onclick="confirmBuy('${item.title}','${nanotons}')">
+                   💳 Купить за ${tonPrice} TON
+               </button>`
+            : `<button class="buy-confirm-btn" onclick="closeBuyModal();tcOpenModal()">
+                   👛 Подключить кошелёк
+               </button>`
+        }
+        <button class="buy-cancel-btn" onclick="closeBuyModal()">Отмена</button>
+    `;
+
+    // Inject lottie
+    const lw = document.getElementById('buy-lottie-wrap');
+    if (lw && item.lottie) {
+        const lp = document.createElement('lottie-player');
+        lp.setAttribute('src', item.lottie);
+        lp.setAttribute('background','transparent');
+        lp.setAttribute('speed','1');
+        lp.setAttribute('loop','');
+        lp.setAttribute('autoplay','');
+        lp.style.cssText = 'width:64px;height:64px;';
+        lw.appendChild(lp);
+    }
+
+    document.getElementById('buy-modal-overlay').classList.add('active');
+}
+
+function closeBuyModal() {
+    document.getElementById('buy-modal-overlay').classList.remove('active');
+}
+
+async function confirmBuy(title, nanotons) {
+    if (!_tcUI || !_tcConnected) {
+        tcOpenModal(); return;
+    }
+    const btn = document.getElementById('buy-confirm-btn');
+    const status = document.getElementById('buy-status');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Отправка...'; }
+    if (status) status.textContent = 'Подтвердите транзакцию в кошельке...';
+
+    try {
+        const tx = {
+            validUntil: Math.floor(Date.now() / 1000) + 300,
+            messages: [{
+                address: SHOP_WALLET,
+                amount: nanotons,
+            }]
+        };
+        await _tcUI.sendTransaction(tx);
+        if (status) status.innerHTML = '<span style="color:#2ecc71">✅ Оплата прошла! Скоро получишь подарок.</span>';
+        if (btn) { btn.textContent = '✅ Оплачено'; }
+        window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+        setTimeout(closeBuyModal, 3000);
+    } catch(e) {
+        if (status) status.innerHTML = '<span style="color:#e74c3c">❌ Отменено или ошибка</span>';
+        if (btn) { btn.disabled = false; btn.textContent = '💳 Попробовать снова'; }
+    }
+}
+
+
+function openCartCheckout() {
+    if (!_tcConnected) { tcOpenModal(); return; }
+    // Calculate total and send single transaction
+    const total = cartItems.reduce((sum, item) => sum + parseTonPrice(item.price), 0);
+    const nanotons = Math.round(total * 1e9).toString();
+    const fakeItem = { title: 'Заказ из корзины (' + cartItems.length + ' товаров)', collection: 'AstralGifts', price: total + ' TON', bgColor: '#0098EA', lottie: '' };
+    openBuyModal(fakeItem);
+}
 tcInit();
 </script>
 <div id="tc-wallet-modal-overlay" onclick="if(event.target===this)tcCloseMod()">
@@ -7938,5 +8192,14 @@ tcInit();
         </div>
     </div>
 </div>
+
+<!-- BUY MODAL -->
+<div id="buy-modal-overlay" onclick="if(event.target===this)closeBuyModal()">
+    <div id="buy-modal">
+        <div class="buy-modal-handle"></div>
+        <div id="buy-modal-inner"></div>
+    </div>
+</div>
+
 </body>
 </html>
